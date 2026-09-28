@@ -1,0 +1,14 @@
+{
+  "manifest_version": 2,
+  "name": "身份证批量核验助手",
+  "version": "1.0",
+  "description": "导入Excel身份证名单，自动在页面逐条核验，导出带结果标记的Excel",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["http://10.249.6.18/*"],
+      "js": ["lib/xlsx.full.min.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
