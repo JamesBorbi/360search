@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>批量核验助手 - 测试页</title>
+<style>
+  body { font: 14px/1.6 "Microsoft YaHei", Arial, sans-serif; margin: 0; background: #f0f2f5; color: #333; }
+  .hd { background: linear-gradient(135deg, #2b7cff, #1a5dcc); color: #fff; padding: 14px 24px; }
+  .hd h1 { margin: 0; font-size: 18px; }
+  .wrap { max-width: 1000px; margin: 20px auto; padding: 0 16px; display: grid; grid-template-columns: 1fr 340px; gap: 16px; }
+  .pn { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 16px; }
+  .pn h2 { margin: 0 0 14px; font-size: 15px; border-left: 3px solid #2b7cff; padding-left: 8px; }
+  .hint { background: #fffbe6; border: 1px solid #ffe58f; color: #614700; padding: 8px 12px; border-radius: 4px; font-size: 12px; margin-bottom: 14px; }
+  .fi { display: flex; align-items: center; margin-bottom: 10px; }
+  .fl { width: 120px; color: #606266; text-align: right; padding-right: 12px; }
+  .fw { flex: 1; max-width: 300px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #dcdfe6; border-radius: 4px; font: 14px "Microsoft YaHei"; outline: none; }
+  input:focus, select:focus { border-color: #2b7cff; }
+  .btn { padding: 7px 16px; border: 0; border-radius: 4px; cursor: pointer; font: 13px "Microsoft YaHei"; margin-right: 8px; }
+  .b1 { background: #2b7cff; color: #fff; }
+  .b2 { background: #f0f2f5; color: #606266; }
+  .el-message-box { position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); background: #fff; border-radius: 4px; box-shadow: 0 8px 32px rgba(0,0,0,.25); width: 420px; z-index: 99999; }
+  .el-message-box__header { padding: 12px 16px; font-weight: bold; }
+  .el-message-box__content { padding: 10px 20px 18px; color: #606266; }
+  .el-message-box__btns { padding: 0 16px 14px; text-align: right; }
+  .el-message-box__btns button { padding: 6px 14px; border-radius: 4px; border: 1px solid #dcdfe6; background: #fff; cursor: pointer; font: 13px "Microsoft YaHei"; margin-left: 8px; }
+  .el-button--primary { background: #2b7cff; color: #fff; border-color: #2b7cff; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .tbl th, .tbl td { padding: 5px 8px; border-bottom: 1px solid #ebeef5; text-align: left; }
+  .tbl th { background: #f5f7fa; color: #606266; }
+  .mono { font-family: Consolas, monospace; color: #2b7cff; }
+  .ok { color: #1a9c3e; }
+  .dim { color: #aaa; }
+  #log { background: #1e1e1e; color: #d4d4d4; font: 12px/1.5 Consolas, monospace; padding: 8px; border-radius: 4px; max-height: 180px; overflow: auto; }
+</style>
+</head>
+<body>
+<div class="hd"><h1>批量核验助手 - 测试页</h1></div>
+<div class="wrap">
+  <div class="pn">
+    <h2>查询表单</h2>
+    <div class="hint">装好扩展后本页右上角出现「批量核验助手」面板。规则只有一条：出弹窗=已录入（收集）；无弹窗=忽略。</div>
+    <div class="fi"><label class="fl">姓名</label><div class="fw"><input id="f-name" placeholder="请输入姓名"></div></div>
+    <div class="fi"><label class="fl">身份证件种类</label><div class="fw">
+      <select id="f-type">
+        <option value="">请选择</option>
+        <option value="1">居民身份证</option>
+        <option value="2">护照</option>
+      </select></div></div>
+    <div class="fi"><label class="fl">身份证件号码</label><div class="fw"><input id="f-id" placeholder="请输入身份证号"></div></div>
+    <div><button class="btn b1" id="btn-q">查询</button><button class="btn b2" id="btn-r">重置</button></div>
+  </div>
+  <div>
+    <div class="pn">
+      <h2>测试名单（10 条）</h2>
+      <table class="tbl"><thead><tr><th>身份证号</th><th>预期</th></tr></thead><tbody id="tb"></tbody></table>
+      <div style="margin-top:10px"><button class="btn b2" id="btn-copy">复制全部身份证号</button></div>
+    </div>
+    <div class="pn"><h2>日志</h2><div id="log"></div></div>
+  </div>
+</div>
+
+<script>
+// 前 5 条：查询后出弹窗（=已录入，助手收集）；后 5 条：无弹窗（忽略）
+var HIT = ['110101200001011234', '110101200002021235', '110101200003031236', '110101200004041237', '110101200005051238'];
+var MISS = ['46003119500411041X', '460031194512180016', '460100193205210512', '110101194903075628', '320105196508120034'];
+
+function log(t, c) {
+  var d = document.createElement('div');
+  if (c) d.className = c;
+  d.textContent = '[' + new Date().toLocaleTimeString() + '] ' + t;
+  var l = document.getElementById('log');
+  l.appendChild(d); l.scrollTop = l.scrollHeight;
+}
+
+function closeBox() { var b = document.querySelector('.el-message-box'); if (b) b.remove(); }
+function showBox(text) {
+  closeBox();
+  var d = document.createElement('div');
+  d.className = 'el-message-box';
+  d.innerHTML = '<div class="el-message-box__header">提示</div>'
+    + '<div class="el-message-box__content">' + text + '</div>'
+    + '<div class="el-message-box__btns">'
+    + '<button onclick="closeBox()">取消</button>'
+    + '<button class="el-button--primary" onclick="closeBox()">确定</button></div>';
+  document.body.appendChild(d);
+}
+
+function doQuery() {
+  var id = document.getElementById('f-id').value.trim();
+  if (!id) { log('请先输入身份证号'); return; }
+  var type = document.getElementById('f-type').value;
+  log('查询 ' + id);
+  setTimeout(function () {
+    if (!type) { showBox('请选择证件种类'); log('弹窗：请选择证件种类（助手应先自动选好）'); return; }
+    if (HIT.indexOf(id) !== -1) {
+      showBox('已录入身份中不存在该证件，是否确定录入此人？');
+      log('出弹窗 → 已录入（助手收集此号并点「确定」关闭）', 'ok');
+    } else {
+      log('无弹窗 → 忽略', 'dim');
+    }
+  }, 300);
+}
+
+document.getElementById('btn-q').onclick = doQuery;
+document.getElementById('btn-r').onclick = function () {
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-id').value = '';
+  document.getElementById('f-type').value = '';
+  closeBox();
+};
+document.getElementById('f-id').addEventListener('blur', function () {
+  if (this.value.trim().length >= 15) doQuery();
+});
+document.getElementById('f-id').addEventListener('keyup', function (e) {
+  if (e.key === 'Enter') { this.blur(); doQuery(); }
+});
+document.getElementById('btn-copy').onclick = function () {
+  navigator.clipboard.writeText(HIT.concat(MISS).join('\n'))
+    .then(function () { log('已复制 10 个测试号', 'ok'); });
+};
+
+var tb = document.getElementById('tb');
+HIT.forEach(function (id) {
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td class="mono">' + id + '</td><td class="ok">弹窗·已录入</td>';
+  tb.appendChild(tr);
+});
+MISS.forEach(function (id) {
+  var tr = document.createElement('tr');
+  tr.innerHTML = '<td class="mono">' + id + '</td><td class="dim">无弹窗·忽略</td>';
+  tb.appendChild(tr);
+});
+log('测试页就绪');
+</script>
+</body>
+</html>
