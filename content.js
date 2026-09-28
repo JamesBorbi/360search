@@ -1,6 +1,6 @@
-/* 批量核验助手 v1.6
+/* 批量核验助手 v1.7
  * 规则：出弹窗=已录入（收集该号，自动点"确定"关弹窗）；无弹窗=忽略。
- * 导出只有一张表：已录入名单。进度按号码记忆，可断点续跑。
+ * 导出只有一张表：已录入名单。进度按号码记忆，可断点续跑，可手动重新核验。
  */
 (function () {
   if (window.__bzLoaded) return;
@@ -10,9 +10,9 @@
     ID_LABEL: '身份证件号码',
     TYPE_LABEL: '身份证件种类',
     TYPE_TEXT: '居民身份证',
-    WAIT_MS: 4000,
-    POLL_MS: 100,
-    GAP_MS: 400,
+    WAIT_MS: 200,   // 等弹窗最长 200ms（真实系统弹窗慢可调大）
+    POLL_MS: 50,
+    GAP_MS: 50,
     KEY: 'bz_progress_v16'
   };
 
@@ -60,8 +60,14 @@
   function findDlg() {
     var sels = ['.el-message-box', '.layui-layer', '.el-dialog__wrapper', '.ant-modal', '.modal.show'];
     for (var i = 0; i < sels.length; i++) {
-      var d = document.querySelector(sels[i]);
-      if (d && d.offsetParent !== null && getComputedStyle(d).visibility !== 'hidden') return d;
+      var ds = document.querySelectorAll(sels[i]);
+      for (var j = 0; j < ds.length; j++) {
+        var d = ds[j];
+        var cs = getComputedStyle(d);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+        var r = d.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) return d;  // 不能用 offsetParent：fixed 定位元素它恒为 null
+      }
     }
     return null;
   }
@@ -99,7 +105,7 @@
     if (dlg) {
       var text = (dlg.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
       closeDlg();
-      await sleep(250);
+      await sleep(80);
       if (findDlg()) closeDlg();
       return { hit: true, text: text };
     }
@@ -118,7 +124,9 @@
     '#bz-panel .b1{background:#2b7cff;color:#fff;}',
     '#bz-panel .b2{background:#f0f2f5;color:#333;}',
     '#bz-panel .b3{background:#f90;color:#fff;}',
+    '#bz-panel .b4{background:#ff6b35;color:#fff;}',
     '#bz-panel button:disabled{opacity:.5;cursor:not-allowed;}',
+    '#bz-panel .row button{margin-bottom:4px;}',
     '#bz-panel .bar{height:6px;background:#eef1f6;border-radius:3px;overflow:hidden;margin:6px 0;}',
     '#bz-panel .bar i{display:block;height:100%;width:0;background:#2b7cff;transition:width .3s;}',
     '#bz-panel .st{font-size:12px;color:#666;}',
@@ -141,11 +149,14 @@
     '<div class="row">',
     '<button class="b1" id="bz-start" disabled>② 开始核验</button>',
     '<button class="b2" id="bz-stop" disabled>暂停</button>',
+    '<button class="b4" id="bz-restart" disabled>重新核验</button>',
     '</div>',
     '<div class="bar"><i id="bz-bar"></i></div>',
     '<div class="st" id="bz-stat">请先选择名单文件</div>',
     '<div class="row" style="margin-top:8px">',
     '<button class="b3" id="bz-export" disabled>③ 导出已录入名单</button>',
+    '<button class="b2" id="bz-copy" disabled>复制 CSV</button>',
+    '<button class="b2" id="bz-clearmem">清空全部进度</button>',
     '</div>',
     '<div class="lg" id="bz-log"></div>',
     '</div>'
@@ -184,6 +195,25 @@
     $('bz-bar').style.width = n ? (done / n * 100) + '%' : '0';
     $('bz-stat').textContent = n ? '进度 ' + done + '/' + n + ' ｜ 已录入 ' + hit : '请先选择名单文件';
     $('bz-export').disabled = hit === 0;
+    $('bz-copy').disabled = hit === 0;
+    $('bz-restart').disabled = !LIST.length || (!running && done === 0);
+  }
+
+  function buildHits() {
+    var hits = [];
+    for (var i = 0; i < LIST.length; i++) {
+      if (LIST[i].done && LIST[i].status === '已录入') hits.push(LIST[i]);
+    }
+    return hits;
+  }
+  function buildCsv(hits) {
+    var lines = ['\uFEFF序号,身份证号,姓名'];
+    for (var j = 0; j < hits.length; j++) {
+      var id = String(hits[j].id || '').replace(/"/g, '""');
+      var nm = String(hits[j].name || '').replace(/"/g, '""');
+      lines.push((j + 1) + ',"' + id + '","' + nm + '"');
+    }
+    return lines.join('\r\n');
   }
 
   /* ---------- ① 选择文件 ---------- */
@@ -265,12 +295,78 @@
   };
   $('bz-stop').onclick = function () { running = false; };
 
-  /* ---------- ③ 导出：只有已录入名单 ---------- */
-  $('bz-export').onclick = function () {
-    var hits = [];
-    for (var i = 0; i < LIST.length; i++) {
-      if (LIST[i].done && LIST[i].status === '已录入') hits.push(LIST[i]);
+  /* ---------- 重新核验：清空当前 LIST 的进度后从头跑 ---------- */
+  $('bz-restart').onclick = function () {
+    if (running) { log('正在核验中，先点「暂停」'); return; }
+    if (!LIST.length) return;
+    var doneCount = 0;
+    for (var i = 0; i < LIST.length; i++) if (LIST[i].done) doneCount++;
+    if (!doneCount) { log('当前没有进度，无需重新核验'); return; }
+    if (!confirm('确定要清空当前 ' + doneCount + ' 条进度，从头重新核验？\n（原结果会从本地缓存删除，不可恢复）')) return;
+    for (var j = 0; j < LIST.length; j++) {
+      delete mem[LIST[j].id];
+      LIST[j].done = false;
+      LIST[j].status = '';
+      LIST[j].text = '';
     }
+    saveMem();
+    log('已清空 ' + doneCount + ' 条进度，准备重新核验', 'ok');
+    refresh();
+    // 直接触发新一轮核验
+    $('bz-start').click();
+  };
+
+  /* ---------- 清空全部进度：彻底抹掉 localStorage ---------- */
+  $('bz-clearmem').onclick = function () {
+    if (running) { log('正在核验中，先点「暂停」'); return; }
+    var keys = Object.keys(mem).length;
+    if (!keys) { log('本地没有保存的进度'); return; }
+    if (!confirm('确定要清空本地保存的全部 ' + keys + ' 条进度？\n（重新选择文件后将从零开始）')) return;
+    mem = {};
+    saveMem();
+    for (var i = 0; i < LIST.length; i++) {
+      LIST[i].done = false;
+      LIST[i].status = '';
+      LIST[i].text = '';
+    }
+    log('已清空本地全部进度', 'ok');
+    refresh();
+  };
+
+  /* ---------- 复制 CSV 到剪贴板（下载失败时兜底） ---------- */
+  $('bz-copy').onclick = function () {
+    var hits = buildHits();
+    if (!hits.length) { log('还没有已录入的号码'); return; }
+    var csv = buildCsv(hits);
+    var done = function () { log('已复制 ' + hits.length + ' 条 CSV 到剪贴板', 'ok'); };
+    var fail = function () { log('复制失败，请改用「导出 Excel」按钮'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(csv).then(done).catch(function () {
+        legacyCopy(csv) ? done() : fail();
+      });
+    } else if (legacyCopy(csv)) {
+      done();
+    } else {
+      fail();
+    }
+  };
+  function legacyCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
+
+  /* ---------- ③ 导出：只有已录入名单（用 Blob + <a download>） ---------- */
+  $('bz-export').onclick = function () {
+    var hits = buildHits();
     if (!hits.length) { log('还没有已录入的号码'); return; }
     var aoa = [['序号', '身份证号', '姓名']];
     for (var j = 0; j < hits.length; j++) aoa.push([j + 1, hits[j].id, hits[j].name || '']);
@@ -278,8 +374,37 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '已录入名单');
     var d = new Date();
     var ds = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
-    XLSX.writeFile(wb, '已录入名单_' + ds + '.xlsx');
-    log('已导出 ' + hits.length + ' 条', 'ok');
+    var fname = '已录入名单_' + ds + '.xlsx';
+    var ok = false;
+    try {
+      // 1) 首选：Blob + <a download>（更可控，绕过 XLSX.writeFile 在某些浏览器下的失效）
+      var buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      var blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        if (a.parentNode) a.parentNode.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 200);
+      ok = true;
+    } catch (e1) {
+      try {
+        // 2) 兜底：XLSX.writeFile 原生方式
+        XLSX.writeFile(wb, fname);
+        ok = true;
+      } catch (e2) {
+        log('导出失败：' + (e2 && e2.message || e2));
+      }
+    }
+    if (ok) {
+      log('已导出 ' + hits.length + ' 条（' + fname + '），如未弹出下载框请检查浏览器是否拦截，或改用「复制 CSV」按钮', 'ok');
+    }
   };
 
   refresh();
